@@ -286,10 +286,10 @@ voxl-configure-tflite \
 Config notes:
 
 - `--norm-type NONE`: use this when your helper already normalizes inside `run_inference()`.
-- `--delegate gpu`: runs with the TFLite GPU delegate when supported.
+- `--delegate gpu`: runs supported graph partitions with the TFLite GPU delegate.
 - `--delegate nnapi`: tries NNAPI/NPU-style acceleration on QRB5165 builds.
-- `--delegate cpu`: uses CPU/XNNPACK fallback; useful for debugging, but usually slower.
-- `--skip-frames 5`: on a 30 Hz camera, process about every sixth frame, roughly 5 Hz output. Use a larger value to reduce load, or `0` to process every frame.
+- `--delegate cpu`: uses CPU/XNNPACK; useful for debugging and as a stable baseline.
+- `--skip-frames 5`: on a 30 Hz camera, attempts to process about every sixth input frame. Actual output FPS depends on model latency.
 
 Restart the service:
 
@@ -301,17 +301,48 @@ Verify:
 
 ```bash
 cat /etc/modalai/voxl-tflite-server.conf
-journalctl -u voxl-tflite-server -n 50 --no-pager
+journalctl -u voxl-tflite-server --since "5 min ago" --no-pager
 ls -la /run/mpa/tflite/
 ```
 
-Open `voxl-portal` in a browser and enable the `tflite` stream.
+For visualization, open `voxl-portal` and select the `tflite` camera stream. For verification and performance testing, prefer `voxl-inspect-cam tflite` and timing mode.
 
-## 9. Examples
+## 9. Debug
+- Confirm config
+```bash
+cat /etc/modalai/voxl-tflite-server.conf
+```
+- Confirm Binary has your helper
+```bash
+strings /usr/bin/voxl-tflite-server | grep -E 'YOUR_ARCH|YourModelHelper'
+```
+- Confirm model file exists
+```bash
+ls -lh /usr/bin/dnn/your_model.tflite
+```
+- Confirm camera pipe exists
+```bash
+ls /run/mpa/
+ls /run/mpa/hires_front_small_color/
+```
+- Inspect output pipe
+```bash
+voxl-inspect-cam tflite
+```
+- Timing test
+```bash
+systemctl stop voxl-tflite-server
+sudo killall voxl-tflite-server 2>/dev/null
+ps aux | grep '[v]oxl-tflite-server' || echo "OK"
+/usr/bin/voxl-tflite-server -t
+```
+For output FPS, look for a log line like `Current pipeline throughput: 2.5 frames per second`. The timing table is mainly useful for rough stage timing; depending on the helper, its `processed frames` count may not equal completed published output frames.
+
+## 10. Examples
 
 These are complete helper examples you can copy into `voxl-tflite-server` instead of starting from `mymodel/`.
 
-### 9.1 DepthAnythingV3
+### 10.1 DepthAnythingV3
 
 Path:
 
@@ -325,10 +356,10 @@ This helper expects a float32 DA3 export:
 - input preprocessing: `uint8 RGB / 255.0`
 - output: float32 depth map
 - visualization: per-frame normalized JET colormap
-- suggested `model_architecture`: `DA3`
+- suggested `model_architecture`: `DEPTHANYTHINGV3`
 - category: `MONO_DEPTH`
 
-### 9.2 MiDaS
+### 10.2 MiDaS
 
 Path:
 
