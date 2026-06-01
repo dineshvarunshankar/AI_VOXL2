@@ -1,0 +1,32 @@
+# Model artifacts
+*.tflite
+*.onnx
+*.pt
+*.pth
+*.bin
+
+# Qualcomm / export archives
+*.zip
+*.tgz
+*.tar.gz
+
+# ModalAI server clones and build outputs
+voxl-tflite-server/
+build/
+build32/
+build64/
+*.deb
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Editor / OS files
+.DS_Store
+.vscode/
+*.swp
+*.swo
+
+# Logs and temporary files
+*.log
+*.tmp
