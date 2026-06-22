@@ -291,7 +291,8 @@ Config notes:
 - `--delegate nnapi`: tries NNAPI/NPU-style acceleration on QRB5165 builds.
 - `--delegate cpu`: uses CPU/XNNPACK; useful for debugging and as a stable baseline.
 - `--skip-frames 5`: on a 30 Hz camera, attempts to process about every sixth input frame. Actual output FPS depends on model latency.
-- `--input-pipe`: use `hires_small_color` if you are using starling 2 and `hires_front_small_color` if you are using starling 2 MAX
+- `--input-pipe`: use `hires_small_color` if you are using starling 2 and `hires_front_small_color` if you are using starling 2 MAX.
+
 Restart the service:
 
 ```bash
