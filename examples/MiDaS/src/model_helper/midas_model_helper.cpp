@@ -6,6 +6,11 @@
 #include "image_utils.h"
 #include "tensor_data.h"
 
+// Publish the raw quantized MiDaS output (RAW8, lossless) for metric-depth
+// rescaling instead of the RGB JET visualization. The host recovers relative
+// disparity as: disparity = pixel * kMidasOutScale. Set to 0 for the colormap.
+#define MIDAS_PUBLISH_RAW 1
+
 MidasModelHelper::MidasModelHelper(char *model_file, char *labels_file,
                                    DelegateOpt delegate_choice, bool _en_debug,
                                    bool _en_timing, NormalizationType _do_normalize)
@@ -102,6 +107,19 @@ bool MidasModelHelper::postprocess(cv::Mat &output_image, double last_inference_
 
     params->meta.height = model_height;
     params->meta.width = model_width;
+
+#if MIDAS_PUBLISH_RAW
+    (void)last_inference_time;  // only used by the FPS overlay in the colormap path
+    // Single-channel raw depth: lossless and logged as PNG by voxl-logger.
+    // depth = (q - zp) * scale  =>  q = depth / scale + zp  (exact for uint8 output).
+    params->meta.size_bytes = params->meta.width * params->meta.height;
+    params->meta.stride = params->meta.width;
+    params->meta.format = IMAGE_FORMAT_RAW8;
+    depth_image.convertTo(output_image, CV_8U, 1.0 / kMidasOutScale, kMidasOutZeroPoint);
+
+    if (en_timing)
+        total_postprocess_time += (rc_nanos_monotonic_time() - start_time) / 1000000.0f;
+#else
     params->meta.size_bytes = params->meta.width * params->meta.height * 3;
     params->meta.stride = params->meta.width * 3;
     params->meta.format = IMAGE_FORMAT_RGB;
@@ -119,6 +137,7 @@ bool MidasModelHelper::postprocess(cv::Mat &output_image, double last_inference_
 
     draw_fps(output_image, last_inference_time, cv::Point(0, 0), 0.5, 2,
              cv::Scalar(0, 0, 0), cv::Scalar(180, 180, 180), true);
+#endif
 
     return true;
 }
@@ -133,7 +152,9 @@ bool MidasModelHelper::worker(cv::Mat &output_image, double last_inference_time,
     if (!postprocess(output_image, last_inference_time, &params))
         return false;
 
-    params.meta.timestamp_ns = rc_nanos_monotonic_time();
+    // Keep the source frame's capture timestamp (do NOT overwrite with publish
+    // time) so downstream consumers can sync this depth to VIO / hires at the
+    // capture instant rather than after the inference latency.
     pipe_server_write_camera_frame(IMAGE_CH, params.meta,
                                    reinterpret_cast<char *>(output_image.data));
     return true;
