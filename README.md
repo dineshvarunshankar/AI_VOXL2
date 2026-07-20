@@ -31,6 +31,8 @@ AI_VOXL2/
 │   ├── DepthAnythingV3/
 │   └── ZipDepth/
 └── tflite/
+    ├── MiDaS/
+    ├── DepthAnythingV3/
     └── ZipDepth/
 ```
 
@@ -451,6 +453,7 @@ This helper expects a float32 DA3 export:
 - visualization: per-frame normalized JET colormap
 - suggested `model_architecture`: `DEPTHANYTHINGV3`
 - category: `MONO_DEPTH`
+- model: `tflite/DepthAnythingV3/depth_anything_v3.tflite`
 
 ### 10.2 MiDaS
 
@@ -468,6 +471,7 @@ This helper is based on the Qualcomm AI Hub MiDaS w8a8 export:
 - visualization: per-frame normalized JET colormap
 - suggested `model_architecture`: `MIDAS`
 - category: `MONO_DEPTH`
+- model: `tflite/MiDaS/midas.tflite`
 
 ### 10.3 ZipDepth
 
