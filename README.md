@@ -20,19 +20,20 @@ The main idea:
 
 ```text
 AI_VOXL2/
+├── depth_utils/
+│   ├── include/
+│   └── src/
 ├── mymodel/
 │   ├── include/model_helper/mymodel_model_helper.h
 │   └── src/model_helper/mymodel_model_helper.cpp
 └── examples/
+    ├── MiDaS/
     ├── DepthAnythingV3/
-    │   ├── include/model_helper/da3_model_helper.h
-    │   └── src/model_helper/da3_model_helper.cpp
-    └── MiDaS/
-        ├── include/model_helper/midas_model_helper.h
-        └── src/model_helper/midas_model_helper.cpp
+    └── ZipDepth/
 ```
 
-Use `mymodel/` when starting a new model. Use `examples/` when you want a concrete reference.
+Use `mymodel/` when starting a new model. Use `examples/` for concrete references.
+Depth helpers also need `depth_utils/` copied into `voxl-tflite-server`.
 
 ## 1. Prepare a TFLite Model
 
@@ -66,7 +67,10 @@ The helper has four parts:
 1. **Constructor**: calls `ModelHelper(...)`. The base class loads the `.tflite`, builds the interpreter, and reads `model_height`, `model_width`, and `model_channels` from the input tensor.
 2. **`run_inference`**: writes `preprocessed_image` into the model input tensor, applies dtype/layout/quantization handling, then calls `Invoke()`.
 3. **`postprocess`**: reads the output tensor and turns it into what you want to publish, such as a depth colormap, mask, detections, logits, or embeddings.
-4. **`worker`**: calls `postprocess`, timestamps the output, and publishes it to the correct MPA pipe.
+4. **`worker`**: calls `postprocess` and publishes to the MPA pipe(s).
+   `timestamp_ns` must stay as the camera capture time. Replacing it with
+   `rc_nanos_monotonic_time()` stamps the frame at publish time instead, so
+   anything syncing against IMU/VIO is offset by inference latency.
 
 The `.tflite` file does not tell the server which algorithm to run. The helper class does that. The config value `model_architecture` selects the helper at runtime.
 
@@ -109,21 +113,36 @@ cp "$AI_VOXL2"/mymodel/include/model_helper/*.h include/model_helper/
 cp "$AI_VOXL2"/mymodel/src/model_helper/*.cpp src/model_helper/
 ```
 
-For an example model, copy from `examples/DepthAnythingV3/` or `examples/MiDaS/` instead of `mymodel/`.
+For a depth example, copy from `examples/MiDaS/`, `examples/DepthAnythingV3/`,
+or `examples/ZipDepth/` instead of `mymodel/`, and also copy depth utils:
+
+```bash
+mkdir -p src/depth_utils
+cp "$AI_VOXL2"/depth_utils/include/*.h include/
+cp "$AI_VOXL2"/depth_utils/src/*.cpp   src/depth_utils/
+```
 
 After copying, the relevant server files are:
 
 ```text
 voxl-tflite-server/
-├── include/model_helper/
-│   ├── model_info.h
-│   ├── model_helper.h
-│   └── mymodel_model_helper.h
+├── include/
+│   ├── undistort_map.h
+│   ├── depth_preprocessor.h
+│   ├── depth_output.h
+│   └── model_helper/
+│       ├── model_info.h
+│       ├── model_helper.h
+│       └── midas_model_helper.h
 └── src/
     ├── main.cpp
+    ├── depth_utils/
+    │   ├── undistort_map.cpp
+    │   ├── depth_preprocessor.cpp
+    │   └── depth_output.cpp
     └── model_helper/
         ├── model_helper.cpp
-        └── mymodel_model_helper.cpp
+        └── midas_model_helper.cpp
 ```
 
 ### 4.1 Edit `model_info.h`
@@ -179,6 +198,74 @@ else if (!strcasecmp(model_architecture, "MYMODEL"))
 ```
 
 Also add `MYMODEL` to the valid-options error message in the same function.
+
+### 4.4 Depth models: output pipes, timestamps, undistort
+
+Depth helpers can publish either or both of:
+
+- `IMAGE_CH`: JET visualization
+- `DISPARITY_CH`: dequantized `float32` disparity
+
+Choose in `undistort.yml` (at least one must be enabled):
+
+```yaml
+publish_image: 0
+publish_disparity: 1
+```
+
+If you are doing metric rescaling, enable `publish_disparity`. Enable
+`publish_image` when you also want the portal/JET view.
+
+Add the channel define in `include/model_helper/model_helper.h` when using
+`DISPARITY_CH`:
+
+```cpp
+#define IMAGE_CH     0
+#define DETECTION_CH 1
+#define DISPARITY_CH 2
+#define TFLITE_DISPARITY_PATH (MODAL_PIPE_DEFAULT_PATH "tflite_disparity/")
+```
+
+Create the disparity pipe in `main.cpp` when `publish_disparity` is used
+(both the `allow_multiple` and default branches):
+
+```cpp
+if (model_category == MONO_DEPTH)
+{
+    pipe_info_t disparity_pipe = {
+        "tflite_disparity", TFLITE_DISPARITY_PATH, "camera_image_metadata_t",
+        PROCESS_NAME, 16 * 1024 * 1024, 0};
+    pipe_server_create(DISPARITY_CH, disparity_pipe, 0);
+}
+```
+
+In the `allow_multiple` branch, append `_tflite_disparity` to
+`output_pipe_prefix` the same way the image pipe does. With
+`--output-pipe-prefix MIDAS`, the disparity pipe is `MIDAS_tflite_disparity`.
+If you are doing metric rescaling, point the consumer at that same pipe name.
+
+Keep the source camera `timestamp_ns`. `postprocess()` mutates metadata for the
+published image, so copy the source metadata before calling it if you still need
+capture time for `DISPARITY_CH`.
+
+Install the undistort config with this camera's calibration:
+
+```bash
+adb push examples/MiDaS/undistort.yml /etc/voxl-tflite-server/undistort.yml
+```
+
+`fov` is `crop` or `stretch`. If you are doing metric rescaling, use the same
+FOV mode on the consumer side. Missing or invalid calibration is a hard startup
+failure. The helper prints `K_model` at startup; if you project anchors into the
+disparity map, use that same matrix, and match the model resolution
+(256 MiDaS, 384 ZipDepth, 518 DA3).
+
+Log disparity with raw mode so the float32 payload is preserved:
+
+```bash
+voxl-logger --raw tflite_disparity
+# or: voxl-logger --raw MIDAS_tflite_disparity
+```
 
 ## 5. Cross-Compile
 
@@ -343,6 +430,7 @@ For output FPS, look for a log line like `Current pipeline throughput: 2.5 frame
 ## 10. Examples
 
 These are complete helper examples you can copy into `voxl-tflite-server` instead of starting from `mymodel/`.
+Depth examples also need `depth_utils/` and `examples/MiDaS/undistort.yml` (see §4.4).
 
 ### 10.1 DepthAnythingV3
 
@@ -377,6 +465,24 @@ This helper is based on the Qualcomm AI Hub MiDaS w8a8 export:
 - visualization: per-frame normalized JET colormap
 - suggested `model_architecture`: `MIDAS`
 - category: `MONO_DEPTH`
+
+### 10.3 ZipDepth
+
+Path:
+
+```text
+examples/ZipDepth/
+```
+
+This helper expects a float32 ZipDepth export:
+
+- input: NHWC RGB, `1x384x384x3`
+- input preprocessing: `uint8 RGB / 255.0`
+- output: float32 inverse-depth
+- visualization: per-frame normalized JET colormap
+- suggested `model_architecture`: `ZIPDEPTH`
+- category: `MONO_DEPTH`
+- suggested delegate: `gpu`
 
 ## References
 

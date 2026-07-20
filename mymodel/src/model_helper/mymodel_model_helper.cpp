@@ -95,7 +95,7 @@ bool MyModelModelHelper::worker(cv::Mat &output_image, double last_inference_tim
     if (!postprocess(output_image, last_inference_time, &frame_params))
         return false;
 
-    frame_params.meta.timestamp_ns = rc_nanos_monotonic_time();
+    // Keep the source camera timestamp_ns for downstream sync.
     // TODO: For non-image outputs, replace IMAGE_CH publishing with the pipe
     // used by your model type (detections, classifications, embeddings, etc.).
     pipe_server_write_camera_frame(IMAGE_CH, frame_params.meta,

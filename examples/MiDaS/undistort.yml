@@ -1,0 +1,19 @@
+%YAML:1.0
+---
+# Install to /etc/voxl-tflite-server/undistort.yml
+# fov: crop | stretch. If doing metric rescaling, use the same mode there.
+# publish_image / publish_disparity: enable either or both (at least one required)
+fov: "crop"
+publish_image: 0
+publish_disparity: 1
+
+camera:
+   # D0014 hires_small_color, calibrated on 2026-07-16 (RMS 0.436 px)
+   model: "pinhole"
+   width: 1024
+   height: 768
+   fx: 593.0477573442388
+   fy: 591.7125974187695
+   cx: 500.2332128799812
+   cy: 388.6282597746387
+   distortion: [ 0.1388803712085015, -0.2150293276153785, 0.0007812717807851107, 0.002201948904745487, 0.1215502080770114 ]

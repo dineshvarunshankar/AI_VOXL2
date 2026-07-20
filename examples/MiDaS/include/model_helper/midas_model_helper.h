@@ -1,6 +1,7 @@
 #ifndef MIDAS_MODEL_HELPER_H
 #define MIDAS_MODEL_HELPER_H
 
+#include "depth_preprocessor.h"
 #include "model_helper/model_helper.h"
 
 // Qualcomm AI Hub MiDaS w8a8 export.
@@ -21,11 +22,18 @@ public:
     MidasModelHelper(char *model_file, char *labels_file, DelegateOpt delegate_choice,
                      bool _en_debug, bool _en_timing, NormalizationType _do_normalize);
 
+    bool preprocess(camera_image_metadata_t &meta, char *frame,
+                    std::shared_ptr<cv::Mat> preprocessed_image,
+                    std::shared_ptr<cv::Mat> output_image) override;
     bool run_inference(cv::Mat &preprocessed_image, double *last_inference_time) override;
     bool postprocess(cv::Mat &output_image, double last_inference_time,
                      void *input_params) override;
     bool worker(cv::Mat &output_image, double last_inference_time,
                 camera_image_metadata_t metadata, void *input_params) override;
+
+private:
+    DepthPreprocessor preprocessor{"MiDaS"};
+    cv::Mat disparity_image;
 };
 
 #endif
