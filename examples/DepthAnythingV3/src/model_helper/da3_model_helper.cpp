@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#include "depth_output.h"
+#include "depth_utils/depth_output.h"
 #include "image_utils.h"
 #include "tensor_data.h"
 

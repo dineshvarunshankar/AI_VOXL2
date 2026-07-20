@@ -1,7 +1,7 @@
 #ifndef ZIPDEPTH_MODEL_HELPER_H
 #define ZIPDEPTH_MODEL_HELPER_H
 
-#include "depth_preprocessor.h"
+#include "depth_utils/depth_preprocessor.h"
 #include "model_helper/model_helper.h"
 
 // ZipDepth float32 export: 384x384x3 in, inverse-depth out (NHWC).

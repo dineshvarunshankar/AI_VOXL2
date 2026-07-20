@@ -1,7 +1,7 @@
 #ifndef DEPTH_PREPROCESSOR_H
 #define DEPTH_PREPROCESSOR_H
 
-#include "undistort_map.h"
+#include "depth_utils/undistort_map.h"
 
 #include <memory>
 #include <opencv2/core.hpp>

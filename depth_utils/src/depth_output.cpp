@@ -1,4 +1,4 @@
-#include "depth_output.h"
+#include "depth_utils/depth_output.h"
 
 #include <cstdio>
 #include <modal_pipe.h>

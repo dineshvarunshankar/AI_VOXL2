@@ -122,8 +122,8 @@ For a depth example, copy from `examples/MiDaS/`, `examples/DepthAnythingV3/`,
 or `examples/ZipDepth/` instead of `mymodel/`, and also copy depth utils:
 
 ```bash
-mkdir -p src/depth_utils
-cp "$AI_VOXL2"/depth_utils/include/*.h include/
+mkdir -p src/depth_utils include/depth_utils
+cp "$AI_VOXL2"/depth_utils/include/*.h include/depth_utils/
 cp "$AI_VOXL2"/depth_utils/src/*.cpp   src/depth_utils/
 ```
 
@@ -132,9 +132,10 @@ After copying, the relevant server files are:
 ```text
 voxl-tflite-server/
 ├── include/
-│   ├── undistort_map.h
-│   ├── depth_preprocessor.h
-│   ├── depth_output.h
+│   ├── depth_utils/
+│   │   ├── undistort_map.h
+│   │   ├── depth_preprocessor.h
+│   │   └── depth_output.h
 │   └── model_helper/
 │       ├── model_info.h
 │       ├── model_helper.h

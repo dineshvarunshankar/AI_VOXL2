@@ -1,7 +1,7 @@
 #ifndef MIDAS_MODEL_HELPER_H
 #define MIDAS_MODEL_HELPER_H
 
-#include "depth_preprocessor.h"
+#include "depth_utils/depth_preprocessor.h"
 #include "model_helper/model_helper.h"
 
 // Qualcomm AI Hub MiDaS w8a8 export.

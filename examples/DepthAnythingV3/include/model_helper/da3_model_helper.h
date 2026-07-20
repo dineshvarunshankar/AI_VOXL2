@@ -1,7 +1,7 @@
 #ifndef DA3_MODEL_HELPER_H
 #define DA3_MODEL_HELPER_H
 
-#include "depth_preprocessor.h"
+#include "depth_utils/depth_preprocessor.h"
 #include "model_helper/model_helper.h"
 
 // depth_anything_v3.tflite — float32, 518x518x3 in, depth out (NHWC)
