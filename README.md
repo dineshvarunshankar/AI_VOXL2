@@ -256,7 +256,7 @@ capture time for `DISPARITY_CH`.
 Install the undistort config with this camera's calibration:
 
 ```bash
-adb push examples/MiDaS/undistort.yml /etc/voxl-tflite-server/undistort.yml
+adb push depth_utils/undistort.yml /etc/voxl-tflite-server/undistort.yml
 ```
 
 `fov` is `crop` or `stretch`. If you are doing metric rescaling, use the same
@@ -435,7 +435,7 @@ For output FPS, look for a log line like `Current pipeline throughput: 2.5 frame
 ## 10. Examples
 
 These are complete helper examples you can copy into `voxl-tflite-server` instead of starting from `mymodel/`.
-Depth examples also need `depth_utils/` and `examples/MiDaS/undistort.yml` (see §4.4).
+Depth examples also need `depth_utils/` (which includes the shared `undistort.yml`, see §4.4).
 
 ### 10.1 DepthAnythingV3
 
