@@ -26,13 +26,16 @@ AI_VOXL2/
 ├── mymodel/
 │   ├── include/model_helper/mymodel_model_helper.h
 │   └── src/model_helper/mymodel_model_helper.cpp
-└── examples/
-    ├── MiDaS/
-    ├── DepthAnythingV3/
+├── examples/
+│   ├── MiDaS/
+│   ├── DepthAnythingV3/
+│   └── ZipDepth/
+└── tflite/
     └── ZipDepth/
 ```
 
 Use `mymodel/` when starting a new model. Use `examples/` for concrete references.
+Model binaries live under `tflite/<ModelName>/` (`.tflite` files are gitignored).
 Depth helpers also need `depth_utils/` copied into `voxl-tflite-server`.
 
 ## 1. Prepare a TFLite Model
@@ -483,6 +486,7 @@ This helper expects a float32 ZipDepth export:
 - suggested `model_architecture`: `ZIPDEPTH`
 - category: `MONO_DEPTH`
 - suggested delegate: `gpu`
+- model: `tflite/ZipDepth/zipdepth_base_384x384_float32.tflite`
 
 ## References
 
