@@ -229,11 +229,12 @@ Add the channel define in `include/model_helper/model_helper.h` when using
 #define IMAGE_CH     0
 #define DETECTION_CH 1
 #define DISPARITY_CH 2
-#define TFLITE_DISPARITY_PATH (MODAL_PIPE_DEFAULT_PATH "tflite_disparity/")
+#define TFLITE_DISPARITY_PATH (MODAL_PIPE_DEFAULT_BASE_DIR "tflite_disparity/")
 ```
 
-Create the disparity pipe in `main.cpp` when `publish_disparity` is used
-(both the `allow_multiple` and default branches):
+Create the disparity pipe in `main.cpp` when `publish_disparity` is used.
+Add it to **both** the default (`if (!allow_multiple)`) and `allow_multiple`
+branches.
 
 ```cpp
 if (model_category == MONO_DEPTH)
@@ -253,6 +254,17 @@ If you are doing metric rescaling, point the consumer at that same pipe name.
 Keep the source camera `timestamp_ns`. `postprocess()` mutates metadata for the
 published image, so copy the source metadata before calling it if you still need
 capture time for `DISPARITY_CH`.
+
+`_camera_helper_cb` skips inference when no client is connected, but checks
+`IMAGE_CH`/`DETECTION_CH` only. Add `DISPARITY_CH`, or disparity-only runs
+(`publish_image: 0`) drop every frame:
+
+```cpp
+if (!pipe_server_get_num_clients(IMAGE_CH) &&
+    !pipe_server_get_num_clients(DETECTION_CH) &&
+    !pipe_server_get_num_clients(DISPARITY_CH))
+    return;
+```
 
 Install the undistort config with this camera's calibration:
 
