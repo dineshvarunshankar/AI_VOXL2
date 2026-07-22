@@ -205,84 +205,74 @@ else if (!strcasecmp(model_architecture, "MYMODEL"))
 
 Also add `MYMODEL` to the valid-options error message in the same function.
 
-### 4.4 Depth models: output pipes, timestamps, undistort
+### 4.4 Depth models: pipes and undistort
 
-Depth helpers can publish either or both of:
-
-- `IMAGE_CH`: JET visualization
-- `DISPARITY_CH`: dequantized `float32` disparity
-
-Choose in `undistort.yml` (at least one must be enabled):
+`undistort.yml`:
 
 ```yaml
 publish_image: 0
 publish_disparity: 1
 ```
 
-If you are doing metric rescaling, enable `publish_disparity`. Enable
-`publish_image` when you also want the portal/JET view.
-
-Add the channel define in `include/model_helper/model_helper.h` when using
-`DISPARITY_CH`:
+`include/model_helper/model_helper.h`:
 
 ```cpp
-#define IMAGE_CH     0
+#define IMAGE_CH 0
 #define DETECTION_CH 1
 #define DISPARITY_CH 2
 #define TFLITE_DISPARITY_PATH (MODAL_PIPE_DEFAULT_BASE_DIR "tflite_disparity/")
 ```
 
-Create the disparity pipe in `main.cpp` when `publish_disparity` is used.
-Add it to **both** the default (`if (!allow_multiple)`) and `allow_multiple`
-branches.
+`main.cpp` — create `DISPARITY_CH` in both `!allow_multiple` and `allow_multiple`.
+For `publish_image: 0`, create only `DISPARITY_CH` for `MONO_DEPTH`.
 
 ```cpp
-if (model_category == MONO_DEPTH)
+// !allow_multiple
+pipe_info_t disparity_pipe = {
+    "tflite_disparity", TFLITE_DISPARITY_PATH, "camera_image_metadata_t",
+    PROCESS_NAME, 16 * 1024 * 1024, 0};
+pipe_server_create(DISPARITY_CH, disparity_pipe, 0);
+
+// allow_multiple
+pipe_info_t disparity_pipe = {
+    "tflite_disparity", "unknown", "camera_image_metadata_t",
+    PROCESS_NAME, 16 * 1024 * 1024, 0};
+std::string disp = MODAL_PIPE_DEFAULT_BASE_DIR;
+disp.append(output_pipe_prefix);
+disp.append("_tflite_disparity");
+strncpy(disparity_pipe.location, disp.c_str(), MODAL_PIPE_MAX_DIR_LEN - 1);
+disparity_pipe.location[MODAL_PIPE_MAX_DIR_LEN - 1] = '\0';
+pipe_server_create(DISPARITY_CH, disparity_pipe, 0);
+```
+
+Pipe names: `tflite_disparity`, or `{prefix}_tflite_disparity`.
+
+`_camera_helper_cb` cannot see `main`'s local `model_category`. Store it and skip
+the client gate for depth:
+
+```cpp
+// file scope (near other globals)
+static ModelCategory g_model_category;
+
+// in main(), after get_model_type(...):
+g_model_category = model_category;
+
+// in _camera_helper_cb, replace the stock client check with:
+if (!en_debug && !en_timing && g_model_category != MONO_DEPTH)
 {
-    pipe_info_t disparity_pipe = {
-        "tflite_disparity", TFLITE_DISPARITY_PATH, "camera_image_metadata_t",
-        PROCESS_NAME, 16 * 1024 * 1024, 0};
-    pipe_server_create(DISPARITY_CH, disparity_pipe, 0);
+    if (!pipe_server_get_num_clients(IMAGE_CH) &&
+        !pipe_server_get_num_clients(DETECTION_CH))
+        return;
 }
 ```
 
-In the `allow_multiple` branch, append `_tflite_disparity` to
-`output_pipe_prefix` the same way the image pipe does. With
-`--output-pipe-prefix MIDAS`, the disparity pipe is `MIDAS_tflite_disparity`.
-If you are doing metric rescaling, point the consumer at that same pipe name.
-
-Keep the source camera `timestamp_ns`. `postprocess()` mutates metadata for the
-published image, so copy the source metadata before calling it if you still need
-capture time for `DISPARITY_CH`.
-
-`_camera_helper_cb` skips inference when no client is connected, but checks
-`IMAGE_CH`/`DETECTION_CH` only. Add `DISPARITY_CH`, or disparity-only runs
-(`publish_image: 0`) drop every frame:
-
-```cpp
-if (!pipe_server_get_num_clients(IMAGE_CH) &&
-    !pipe_server_get_num_clients(DETECTION_CH) &&
-    !pipe_server_get_num_clients(DISPARITY_CH))
-    return;
-```
-
-Install the undistort config with this camera's calibration:
+Copy source `camera_image_metadata_t` before `postprocess()` if `DISPARITY_CH`
+needs the capture timestamp. Match `fov` and model resolution on the consumer
+(256 MiDaS, 384 ZipDepth, 518 DA3). `K_model` is printed at helper startup.
 
 ```bash
 adb push depth_utils/undistort.yml /etc/voxl-tflite-server/undistort.yml
-```
-
-`fov` is `crop` or `stretch`. If you are doing metric rescaling, use the same
-FOV mode on the consumer side. Missing or invalid calibration is a hard startup
-failure. The helper prints `K_model` at startup; if you project anchors into the
-disparity map, use that same matrix, and match the model resolution
-(256 MiDaS, 384 ZipDepth, 518 DA3).
-
-Log disparity with raw mode so the float32 payload is preserved:
-
-```bash
 voxl-logger --raw tflite_disparity
-# or: voxl-logger --raw MIDAS_tflite_disparity
 ```
 
 ## 5. Cross-Compile

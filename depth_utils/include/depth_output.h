@@ -1,7 +1,7 @@
 #ifndef DEPTH_OUTPUT_H
 #define DEPTH_OUTPUT_H
 
-#include <cstddef>   // size_t — modal_pipe_interfaces.h/vio_data_t.h use it undeclared
+#include <cstddef> 
 #include <modal_pipe_interfaces.h>
 #include <opencv2/core.hpp>
 
