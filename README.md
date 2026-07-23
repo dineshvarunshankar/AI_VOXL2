@@ -267,8 +267,17 @@ if (!en_debug && !en_timing && g_model_category != MONO_DEPTH)
 ```
 
 Copy source `camera_image_metadata_t` before `postprocess()` if `DISPARITY_CH`
-needs the capture timestamp. Match `fov` and model resolution on the consumer
-(256 MiDaS, 384 ZipDepth, 518 DA3). `K_model` is printed at helper startup.
+needs the capture timestamp. `K_model` is printed at helper startup.
+
+**Starling 2 + mono_depth_rescaler (MiDaS):** match both sides and keep FLOAT32.
+
+| Side | Setting |
+| --- | --- |
+| tflite conf | `model_architecture` = your enum (e.g. `MIDAS_V2`), `delegate: gpu`, `allow_multiple: false`, `skip_frames: 0`, input `hires_small_color` |
+| `undistort.yml` | `publish_image: 0`, `publish_disparity: 1`, `fov: crop` |
+| rescaler | `mpa_pipe_name: tflite_disparity`, `fov: crop`, `input_resolution: [256, 256]`, same hires intrinsics |
+
+Wrong FOV/size leads to dropped frames. Pipe name is `tflite_disparity` only when `allow_multiple: false`.
 
 ```bash
 adb push depth_utils/undistort.yml /etc/voxl-tflite-server/undistort.yml
@@ -372,11 +381,11 @@ voxl-configure-tflite \
   --model-path /usr/bin/dnn/mymodel.tflite \
   --model-arch MYMODEL \
   --norm-type NONE \
-  --input-pipe /run/mpa/hires_front_small_color/ \
+  --input-pipe /run/mpa/hires_small_color/ \
   --delegate gpu \
   --output-pipe-prefix MYMODEL \
   --require-labels false \
-  --skip-frames 5
+  --skip-frames 0
 ```
 
 Config notes:
@@ -385,8 +394,8 @@ Config notes:
 - `--delegate gpu`: runs supported graph partitions with the TFLite GPU delegate.
 - `--delegate nnapi`: tries NNAPI/NPU-style acceleration on QRB5165 builds.
 - `--delegate cpu`: uses CPU/XNNPACK; useful for debugging and as a stable baseline.
-- `--skip-frames 5`: on a 30 Hz camera, attempts to process about every sixth input frame. Actual output FPS depends on model latency.
-- `--input-pipe`: use `hires_small_color` if you are using starling 2 and `hires_front_small_color` if you are using starling 2 MAX.
+- `--skip-frames 0`: process every camera frame (use for MiDaS ↔ rescaler). Raise only to throttle load when hot.
+- `--input-pipe`: Starling 2 → `hires_small_color`; Starling 2 MAX → `hires_front_small_color`.
 
 Restart the service:
 
