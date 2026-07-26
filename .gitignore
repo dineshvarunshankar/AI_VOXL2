@@ -30,3 +30,6 @@ __pycache__/
 # Logs and temporary files
 *.log
 *.tmp
+
+# Local session notes
+SESSION_CONTEXT.md
