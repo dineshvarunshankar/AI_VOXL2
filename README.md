@@ -110,6 +110,33 @@ git clone https://gitlab.com/voxl-public/voxl-sdk/services/voxl-tflite-server.gi
 cd voxl-tflite-server
 ```
 
+Fix a threading bug in the server. `src/inference_handler.cpp` has three lines
+that set `postprocess_finish`. Replace each one with a block that takes the
+lock first.
+
+Change this:
+
+```cpp
+postprocess_finish = false;
+```
+
+To this:
+
+```cpp
+{
+    std::lock_guard<std::mutex> lock_finish(postprocess_mutex);
+    postprocess_finish = false;
+}
+```
+
+Do the same for the other two lines, which use `true` instead of `false`. Any
+`postprocess_cond.notify_one();` that follows stays where it is, after the
+closing brace.
+
+Without this the server stops sending output after a few minutes. It keeps
+running and printing its throughput, so it looks healthy, but nothing comes out
+until you restart it.
+
 Copy the template helper into the server tree:
 
 ```bash
