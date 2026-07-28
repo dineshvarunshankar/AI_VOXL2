@@ -30,6 +30,8 @@ AI_VOXL2/
 │   ├── MiDaS/
 │   ├── DepthAnythingV3/
 │   └── ZipDepth/
+├── patches/
+│   └── fix-postprocess-deadlock.patch
 └── tflite/
     ├── MiDaS/
     ├── DepthAnythingV3/
@@ -110,10 +112,20 @@ git clone https://gitlab.com/voxl-public/voxl-sdk/services/voxl-tflite-server.gi
 cd voxl-tflite-server
 ```
 
-Copy the template helper into the server tree:
+Apply the upstream fix:
 
 ```bash
 export AI_VOXL2=/path/to/AI_VOXL2
+git apply "$AI_VOXL2"/patches/fix-postprocess-deadlock.patch
+```
+
+Without it the server can stop producing output after a random number of
+frames. The process stays alive and keeps logging, but the output pipe goes
+quiet until it is restarted.
+
+Copy the template helper into the server tree:
+
+```bash
 cp "$AI_VOXL2"/mymodel/include/model_helper/*.h include/model_helper/
 cp "$AI_VOXL2"/mymodel/src/model_helper/*.cpp src/model_helper/
 ```
