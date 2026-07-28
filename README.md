@@ -273,7 +273,7 @@ needs the capture timestamp. `K_model` is printed at helper startup.
 
 | Side | Setting |
 | --- | --- |
-| tflite conf | `model_architecture` = your enum (e.g. `MIDAS_V2`), `delegate: gpu`, `allow_multiple: false`, `skip_frames: 0`, input `hires_small_color` |
+| tflite conf | `model_architecture` = your enum (e.g. `MIDAS_V2`), `delegate: gpu`, `allow_multiple: false`, `skip_n_frames: 1`, input `hires_small_color` |
 | `undistort.yml` | `publish_image: 0`, `publish_disparity: 1`, `fov: crop` |
 | rescaler | `mpa_pipe_name: tflite_disparity`, `fov: crop`, `input_resolution: [256, 256]`, same hires intrinsics |
 
