@@ -10,8 +10,7 @@
 *.tgz
 *.tar.gz
 
-# ModalAI server clones and build outputs
-voxl-tflite-server/
+# Build outputs
 build/
 build32/
 build64/

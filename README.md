@@ -1,537 +1,309 @@
 # Deploy AI Models on ModalAI VOXL 2
 
-This repository helps you deploy custom TFLite models on ModalAI's Qualcomm-based VOXL 2 AI computer.
+Deploying TFLite models and the services around them on VOXL 2 (QRB5165).
 
-The main idea:
+```bash
+git clone --recursive https://github.com/dineshvarunshankar/AI_VOXL2.git   # repo + pinned modules
+cd AI_VOXL2 && git submodule update --init --remote --recursive            # optional: latest module mains
+```
 
-- `mymodel/` is the reusable template.
-- `examples/` contains filled-in model helpers.
-- `voxl-tflite-server` is a separate ModalAI repo that you patch, build, and install on VOXL 2.
+`--recursive` is required; without it `modules/` is empty. Skip the second
+command if the pinned module commits are enough.
+
+Commands are marked **[host]** for the build machine and **[drone]** for a shell
+on the VOXL. Anything starting `adb` runs on the host and acts on the drone.
+
+## Modules
+
+- **`voxl-tflite-server`** : runs a TFLite model on a camera stream and
+  publishes its output on an MPA pipe.
+- **`voxl-open-vins-server`** : VIO. Publishes pose and 3D feature positions.
+- **`mono_depth_rescaler`** : converts relative disparity to metric depth using
+  VIO features and ToF as distance references. Runs no model itself.
+
+Deploy only the modules you need. To add a model that isn't already registered,
+see `mymodel/README.md`.
 
 ## Requirements
 
 - VOXL 2 / QRB5165 connected over USB or WiFi
-- Linux PC with Docker
-- ModalAI `voxl-docker` wrapper
-- ModalAI `voxl-cross` Docker image
-- A TFLite model and its input/output details
+- Docker
+- ModalAI `voxl-docker` wrapper and `voxl-cross` image
 
 ## Repo Layout
 
 ```text
 AI_VOXL2/
-├── depth_utils/
-│   ├── include/
-│   └── src/
-├── mymodel/
-│   ├── include/model_helper/mymodel_model_helper.h
-│   └── src/model_helper/mymodel_model_helper.cpp
-├── examples/
-│   ├── MiDaS/
-│   ├── DepthAnythingV3/
-│   └── ZipDepth/
-└── tflite/
-    ├── MiDaS/
-    ├── DepthAnythingV3/
-    └── ZipDepth/
+├── modules/
+│   ├── voxl-tflite-server/
+│   ├── voxl-open-vins-server/
+│   └── mono_depth_rescaler/
+├── configs/              #drone configs, edited here and pushed
+├── mymodel/              #template for a new model
+└── tflite/               #model binaries
 ```
 
-Use `mymodel/` when starting a new model. Use `examples/` for concrete references.
-Model binaries live under `tflite/<ModelName>/` (`.tflite` files are gitignored).
-Depth helpers also need `depth_utils/` copied into `voxl-tflite-server`.
+The ModalAI service configs we modify and push are placed in `configs/`.
 
-## 1. Prepare a TFLite Model
+```text
+configs/etc/modalai/   camera-server, tflite-server, open-vins-server, qvio-server,
+                       imu-server, px4, rangefinder-server, vio_cams, extrinsics
+```
 
-You can:
+Paths mirror the drone. §5 lists which of these we change. `undistort.yml` and
+`estimator_config.yaml` are installed by their packages instead.
 
-- use your own TFLite model,
-- download a suitable model from [Qualcomm AI Hub](https://aihub.qualcomm.com/models), or
-- convert a PyTorch model to ONNX and then to TFLite.
+## 1. Install Build Tools
 
-Before writing the helper, know the model contract:
-
-- input shape, for example `1x256x256x3` or `1x3x518x518`
-- layout, usually NHWC for `voxl-tflite-server`
-- dtype, such as `uint8`, `int8`, or `float32`
-- quantization scale and zero point if quantized
-- output shape and meaning, such as depth, mask, logits, or boxes
-
-If you use Qualcomm AI Hub, `metadata.json` is a useful reference for shape, dtype, and quantization constants. Use a device profile close to QRB5165.
-
-## 2. Understand the Template
-
-The template files are:
-
-- `mymodel/include/model_helper/mymodel_model_helper.h`
-- `mymodel/src/model_helper/mymodel_model_helper.cpp`
-
-Rename `mymodel` / `MyModel` / `MYMODEL` when creating a real model helper.
-
-The helper has four parts:
-
-1. **Constructor**: calls `ModelHelper(...)`. The base class loads the `.tflite`, builds the interpreter, and reads `model_height`, `model_width`, and `model_channels` from the input tensor.
-2. **`run_inference`**: writes `preprocessed_image` into the model input tensor, applies dtype/layout/quantization handling, then calls `Invoke()`.
-3. **`postprocess`**: reads the output tensor and turns it into what you want to publish, such as a depth colormap, mask, detections, logits, or embeddings.
-4. **`worker`**: calls `postprocess` and publishes to the MPA pipe(s).
-   `timestamp_ns` must stay as the camera capture time. Replacing it with
-   `rc_nanos_monotonic_time()` stamps the frame at publish time instead, so
-   anything syncing against IMU/VIO is offset by inference latency.
-
-The `.tflite` file does not tell the server which algorithm to run. The helper class does that. The config value `model_architecture` selects the helper at runtime.
-
-## 3. Install ModalAI Build Tools
-
-`voxl-docker` is the host-side wrapper that runs the Docker container with the right mounts. `voxl-cross` is the Docker image that contains the cross compiler and VOXL SDK dependencies.
-
-Install `voxl-docker`:
+**[host]** `voxl-docker` runs the container with the right mounts. `voxl-cross`
+is the image with the cross compiler and SDK dependencies.
 
 ```bash
 mkdir -p ~/voxl2 && cd ~/voxl2
 git clone https://gitlab.com/voxl-public/voxl-docker.git
 cd voxl-docker
 ./install-voxl-docker-script.sh
-```
 
-Load `voxl-cross`:
-
-```bash
 docker load -i ~/Downloads/voxl-cross_V4.8.tgz
 docker tag voxl-cross:V4.8 voxl-cross:latest
 voxl-docker -l
 ```
 
-## 4. Patch `voxl-tflite-server`
+Every module builds the same way: enter the container from the module directory,
+install its dependencies, build, package.
 
-Clone the ModalAI server repo into a path without spaces:
+`dev` is the package section. Switch to `sdk-1.6` if a `dev` build fails to start
+on the drone with `undefined symbol`, which means it was linked against a library
+newer than the one installed there.
 
-```bash
-cd ~/voxl2
-git clone https://gitlab.com/voxl-public/voxl-sdk/services/voxl-tflite-server.git
-cd voxl-tflite-server
-```
+## 2. voxl-tflite-server
 
-Fix a threading bug in the server. `src/inference_handler.cpp` has three lines
-that set `postprocess_finish`. Replace each one with a block that takes the
-lock first.
-
-Change this:
-
-```cpp
-postprocess_finish = false;
-```
-
-To this:
-
-```cpp
-{
-    std::lock_guard<std::mutex> lock_finish(postprocess_mutex);
-    postprocess_finish = false;
-}
-```
-
-Do the same for the other two lines, which use `true` instead of `false`. Any
-`postprocess_cond.notify_one();` that follows stays where it is, after the
-closing brace.
-
-Without this the server stops sending output after a few minutes. It keeps
-running and printing its throughput, so it looks healthy, but nothing comes out
-until you restart it.
-
-Copy the template helper into the server tree:
+### Build **[host]**
 
 ```bash
-export AI_VOXL2=/path/to/AI_VOXL2
-cp "$AI_VOXL2"/mymodel/include/model_helper/*.h include/model_helper/
-cp "$AI_VOXL2"/mymodel/src/model_helper/*.cpp src/model_helper/
-```
-
-For a depth example, copy from `examples/MiDaS/`, `examples/DepthAnythingV3/`,
-or `examples/ZipDepth/` instead of `mymodel/`, and also copy depth utils:
-
-```bash
-mkdir -p src/depth_utils include/depth_utils
-cp "$AI_VOXL2"/depth_utils/include/*.h include/depth_utils/
-cp "$AI_VOXL2"/depth_utils/src/*.cpp   src/depth_utils/
-```
-
-After copying, the relevant server files are:
-
-```text
-voxl-tflite-server/
-├── include/
-│   ├── depth_utils/
-│   │   ├── undistort_map.h
-│   │   ├── depth_preprocessor.h
-│   │   └── depth_output.h
-│   └── model_helper/
-│       ├── model_info.h
-│       ├── model_helper.h
-│       └── midas_model_helper.h
-└── src/
-    ├── main.cpp
-    ├── depth_utils/
-    │   ├── undistort_map.cpp
-    │   ├── depth_preprocessor.cpp
-    │   └── depth_output.cpp
-    └── model_helper/
-        ├── model_helper.cpp
-        └── midas_model_helper.cpp
-```
-
-### 4.1 Edit `model_info.h`
-
-Add your enum value to `ModelName`:
-
-```cpp
-enum ModelName
-{
-    ...
-    MIDAS,
-    MYMODEL,
-    DEEPLAB,
-    ...
-};
-```
-
-### 4.2 Edit `model_helper.cpp`
-
-Include your helper:
-
-```cpp
-#include "model_helper/mymodel_model_helper.h"
-```
-
-Add a factory case in `create_model_helper()`:
-
-```cpp
-case MYMODEL:
-{
-    if (model_category == MONO_DEPTH)
-    {
-        return new MyModelModelHelper(model, labels_in_use, opt_, en_debug, en_timing,
-                                      do_normalize);
-    }
-    fprintf(stderr, "Unsupported category for the given model\n");
-    break;
-}
-```
-
-Choose the right category for your model: `OBJECT_DETECTION`, `CLASSIFICATION`, `SEGMENTATION`, `MONO_DEPTH`, or `POSE`.
-
-### 4.3 Edit `main.cpp`
-
-Map the config string to your enum and category inside `get_model_type()`:
-
-```cpp
-else if (!strcasecmp(model_architecture, "MYMODEL"))
-{
-    *model_name = MYMODEL;
-    *model_category = MONO_DEPTH;
-}
-```
-
-Also add `MYMODEL` to the valid-options error message in the same function.
-
-### 4.4 Depth models: pipes and undistort
-
-`undistort.yml`:
-
-```yaml
-publish_image: 0
-publish_disparity: 1
-```
-
-`include/model_helper/model_helper.h`:
-
-```cpp
-#define IMAGE_CH 0
-#define DETECTION_CH 1
-#define DISPARITY_CH 2
-#define TFLITE_DISPARITY_PATH (MODAL_PIPE_DEFAULT_BASE_DIR "tflite_disparity/")
-```
-
-`main.cpp` — create `DISPARITY_CH` in both `!allow_multiple` and `allow_multiple`.
-For `publish_image: 0`, create only `DISPARITY_CH` for `MONO_DEPTH`.
-
-```cpp
-// !allow_multiple
-pipe_info_t disparity_pipe = {
-    "tflite_disparity", TFLITE_DISPARITY_PATH, "camera_image_metadata_t",
-    PROCESS_NAME, 16 * 1024 * 1024, 0};
-pipe_server_create(DISPARITY_CH, disparity_pipe, 0);
-
-// allow_multiple
-pipe_info_t disparity_pipe = {
-    "tflite_disparity", "unknown", "camera_image_metadata_t",
-    PROCESS_NAME, 16 * 1024 * 1024, 0};
-std::string disp = MODAL_PIPE_DEFAULT_BASE_DIR;
-disp.append(output_pipe_prefix);
-disp.append("_tflite_disparity");
-strncpy(disparity_pipe.location, disp.c_str(), MODAL_PIPE_MAX_DIR_LEN - 1);
-disparity_pipe.location[MODAL_PIPE_MAX_DIR_LEN - 1] = '\0';
-pipe_server_create(DISPARITY_CH, disparity_pipe, 0);
-```
-
-Pipe names: `tflite_disparity`, or `{prefix}_tflite_disparity`.
-
-`_camera_helper_cb` cannot see `main`'s local `model_category`. Store it and skip
-the client gate for depth:
-
-```cpp
-// file scope (near other globals)
-static ModelCategory g_model_category;
-
-// in main(), after get_model_type(...):
-g_model_category = model_category;
-
-// in _camera_helper_cb, replace the stock client check with:
-if (!en_debug && !en_timing && g_model_category != MONO_DEPTH)
-{
-    if (!pipe_server_get_num_clients(IMAGE_CH) &&
-        !pipe_server_get_num_clients(DETECTION_CH))
-        return;
-}
-```
-
-Copy source `camera_image_metadata_t` before `postprocess()` if `DISPARITY_CH`
-needs the capture timestamp. `K_model` is printed at helper startup.
-
-**Starling 2 + mono_depth_rescaler (MiDaS):** match both sides and keep FLOAT32.
-
-| Side | Setting |
-| --- | --- |
-| tflite conf | `model_architecture` = your enum (e.g. `MIDAS_V2`), `delegate: gpu`, `allow_multiple: false`, `skip_n_frames: 1`, input `hires_small_color` |
-| `undistort.yml` | `publish_image: 0`, `publish_disparity: 1`, `fov: crop` |
-| rescaler | `mpa_pipe_name: tflite_disparity`, `fov: crop`, `input_resolution: [256, 256]`, same hires intrinsics |
-
-Wrong FOV/size leads to dropped frames. Pipe name is `tflite_disparity` only when `allow_multiple: false`.
-
-```bash
-adb push depth_utils/undistort.yml /etc/voxl-tflite-server/undistort.yml
-voxl-logger --raw tflite_disparity
-```
-
-## 5. Cross-Compile
-
-Enter the build container:
-
-```bash
-cd ~/voxl2/voxl-tflite-server
+cd modules/voxl-tflite-server
 voxl-docker -i voxl-cross
-```
-
-Inside the container:
-
-```bash
 ./install_build_deps.sh qrb5165 dev
-# or qrb5165-2 if your VOXL 2 image is Ubuntu 20.04 / SDK 2.x
-
 ./build.sh qrb5165
-# or ./build.sh qrb5165-2
-```
-
-If a build fails after changing C++ files, clean and rebuild:
-
-```bash
-rm -rf build
-./build.sh qrb5165
-```
-
-Package the build:
-
-```bash
 ./make_package.sh
 exit
 ```
 
-The package appears in the `voxl-tflite-server` repo root as `voxl-tflite-server_*_arm64.deb`.
-
-## 6. Deploy to VOXL 2
-
-From the host, install the `.deb` on VOXL 2.
-
-USB / ADB:
+### Deploy **[host]**
 
 ```bash
-cd ~/voxl2/voxl-tflite-server
-./deploy_to_voxl.sh adb
+./deploy_to_voxl.sh adb          # or: ./deploy_to_voxl.sh ssh <ip>
+adb push ../../tflite/MiDaS/midas.tflite /usr/bin/dnn/midas.tflite
+adb push ../../configs/etc/modalai/voxl-tflite-server.conf /etc/modalai/voxl-tflite-server.conf
 ```
 
-WiFi / SSH:
+### Configure
 
-```bash
-cd ~/voxl2/voxl-tflite-server
-./deploy_to_voxl.sh ssh <ip>
-```
+The pushed `voxl-tflite-server.conf` sets model path, architecture, input pipe
+and delegate. `voxl-configure-tflite` writes the same file if you prefer flags.
 
-Optional cleanup and binary check:
+- `model_architecture` selects the helper; see §7 for what's registered
+- `delegate`: `gpu`, `nnapi`, or `cpu`
+- `skip_n_frames` throttles inference. The model runs at roughly 15 fps, so use
+  `0` when the camera is at 15 fps and `1` when it is at 30
+- `input_pipe`: Starling 2 uses `hires_small_color`, Starling 2 MAX uses
+  `hires_front_small_color`
 
-```bash
-adb shell "rm -f /data/voxl-tflite-server_*_arm64.deb"
-adb shell "strings /usr/bin/voxl-tflite-server | grep -E 'MYMODEL|MyModelModelHelper' | head -5"
-```
+For depth models, `undistort.yml` sets `publish_image: 0` and
+`publish_disparity: 1`. The package installs it; its `camera` block is D0014's
+calibration and must be replaced for another airframe. The output pipe is
+`tflite_disparity`, or `{prefix}_tflite_disparity` when `allow_multiple: true`.
 
-For SSH:
-
-```bash
-ssh root@${VOXL_IP} "rm -f /data/voxl-tflite-server_*_arm64.deb /tmp/voxl-tflite-server_*_arm64.deb"
-ssh root@${VOXL_IP} "strings /usr/bin/voxl-tflite-server | grep -E 'MYMODEL|MyModelModelHelper' | head -5"
-```
-
-## 7. Install the Model File
-
-Copy the `.tflite` model to VOXL 2. The path is your choice; the config must match it.
-
-ADB:
-
-```bash
-adb push mymodel.tflite /usr/bin/dnn/mymodel.tflite
-```
-
-SSH:
-
-```bash
-scp mymodel.tflite root@<IP>:/usr/bin/dnn/mymodel.tflite
-```
-
-## 8. Configure and Run
-
-`voxl-configure-tflite` writes `/etc/modalai/voxl-tflite-server.conf`. The two important fields are:
-
-- `model`: full path to the `.tflite` file
-- `model_architecture`: helper string handled in `main.cpp`
-
-Configure your model:
-
-```bash
-voxl-configure-tflite \
-  --model-path /usr/bin/dnn/mymodel.tflite \
-  --model-arch MYMODEL \
-  --norm-type NONE \
-  --input-pipe /run/mpa/hires_small_color/ \
-  --delegate gpu \
-  --output-pipe-prefix MYMODEL \
-  --require-labels false \
-  --skip-frames 0
-```
-
-Config notes:
-
-- `--norm-type NONE`: use this when your helper already normalizes inside `run_inference()`.
-- `--delegate gpu`: runs supported graph partitions with the TFLite GPU delegate.
-- `--delegate nnapi`: tries NNAPI/NPU-style acceleration on QRB5165 builds.
-- `--delegate cpu`: uses CPU/XNNPACK; useful for debugging and as a stable baseline.
-- `--skip-frames 0`: process every camera frame (use for MiDaS ↔ rescaler). Raise only to throttle load when hot.
-- `--input-pipe`: Starling 2 → `hires_small_color`; Starling 2 MAX → `hires_front_small_color`.
-
-Restart the service:
+### Verify **[drone]**
 
 ```bash
 systemctl restart voxl-tflite-server
+voxl-inspect-cam tflite_disparity
 ```
 
-Verify:
+## 3. voxl-open-vins-server
+
+### Build **[host]**
 
 ```bash
+cd modules/voxl-open-vins-server
+voxl-docker -i voxl-cross
+./install_build_deps.sh qrb5165 dev
+./build.sh qrb5165
+./make_package.sh
+exit
+```
+
+### Deploy **[host]**
+
+```bash
+./deploy_to_voxl.sh adb
+```
+
+The `.deb` carries `estimator_config.yaml` with the tuned values. Confirm it
+after install, per §5.
+
+### Configure
+
+Three files configure it:
+
+- `/etc/modalai/voxl-open-vins-server.conf` : service behaviour, auto-reset
+  thresholds, and `yaml_folder` pointing at the platform config
+- `/etc/modalai/vio_cams.conf` : which camera pipes feed VIO
+- `<yaml_folder>/estimator_config.yaml` : the estimator, including feature yield
+  (`num_pts`, `min_px_dist`, `max_msckf_in_update`, `max_slam_in_update`)
+
+`voxl-configure-open-vins starling2_2cam` **[drone]** regenerates the first two
+from the Starling 2 preset.
+
+### Verify **[drone]**
+
+```bash
+systemctl restart voxl-open-vins-server
+voxl-inspect-vins
+```
+
+`state` should reach `OKAY` and stay there with features well above zero.
+Initialisation needs motion; a stationary drone sits in `INIT`.
+
+## 4. mono_depth_rescaler
+
+### Build **[host]**
+
+```bash
+cd modules/mono_depth_rescaler
+voxl-docker -i voxl-cross
+./install_build_deps.sh qrb5165 dev
+./build.sh qrb5165
+./make_package.sh
+exit
+```
+
+`./build.sh native` builds on the host and runs the tests.
+
+### Deploy **[host]**
+
+```bash
+adb push mono-depth-rescaler_*_arm64.deb /tmp/
+adb shell dpkg -i /tmp/mono-depth-rescaler_*_arm64.deb
+```
+
+The `.deb` carries `pipeline.yaml`, intrinsics and extrinsics into
+`/etc/mono_depth_rescaler`. Edit them in `modules/mono_depth_rescaler/config/`
+and rebuild, or push one file for a quick change:
+
+```bash
+adb push config/pipeline.yaml /etc/mono_depth_rescaler/pipeline.yaml
+```
+
+### Configure
+
+`pipeline.yaml` holds every knob.
+
+```yaml
+deployment:
+  profile: qvio      # or openvins
+inference:
+  fov: crop
+  input_resolution: [256, 256]
+  mpa_pipe_name: tflite_disparity
+```
+
+Enable the matching VIO service. The `inference` block must agree with the tflite
+side or frames are dropped:
+
+| Side | Setting |
+| --- | --- |
+| `voxl-tflite-server.conf` | `allow_multiple: false`, input `hires_small_color` |
+| `undistort.yml` | `publish_image: 0`, `publish_disparity: 1`, `fov: crop` |
+| `pipeline.yaml` | `mpa_pipe_name: tflite_disparity`, `fov: crop`, `input_resolution: [256, 256]` |
+
+### Verify **[drone]**
+
+```bash
+systemctl start mono_depth_rescaler
+systemctl is-active mono_depth_rescaler
+voxl-inspect-cam metric_depth
+```
+
+## 5. Configs to Check After Deploying
+
+The files we change from ModalAI defaults. Confirm them on the drone after
+deploying.
+
+| file on the drone | what we set | delivered by |
+| --- | --- | --- |
+| `/etc/voxl-tflite-server/undistort.yml` | fov, publish flags, hires calibration | `voxl-tflite-server` package |
+| `/etc/modalai/voxl-tflite-server.conf` | model path, architecture, delegate, `skip_n_frames` | `voxl-configure-tflite`, or push from `configs/` |
+| `/usr/share/modalai/voxl-open-vins/VoxlConfig/starling2/estimator_config.yaml` | `num_pts`, `min_px_dist`, `max_msckf_in_update`, `max_slam_in_update` | `voxl-open-vins-server` package |
+| `/etc/modalai/voxl-camera-server.conf` | ToF at 15 fps | push from `configs/` |
+| `/etc/mono_depth_rescaler/pipeline.yaml` | VIO profile, fov, input resolution, pipe name | `mono-depth-rescaler` package |
+
+```bash
+grep -E "num_pts|min_px_dist|max_msckf_in_update|max_slam_in_update" \
+  /usr/share/modalai/voxl-open-vins/VoxlConfig/starling2/estimator_config.yaml
+grep -E "fps|name" /etc/modalai/voxl-camera-server.conf | grep -A1 tof
 cat /etc/modalai/voxl-tflite-server.conf
-journalctl -u voxl-tflite-server --since "5 min ago" --no-pager
-ls -la /run/mpa/tflite/
 ```
 
-For visualization, open `voxl-portal` and select the `tflite` camera stream. For verification and performance testing, prefer `voxl-inspect-cam tflite` and timing mode.
+`configs/` also holds `extrinsics.conf`, `vio_cams.conf`, `voxl-imu-server.conf`,
+`voxl-px4.conf`, `voxl-qvio-server.conf` and `voxl-rangefinder-server.conf`, for
+reference.
 
-## 9. Debug
-- Confirm config
-```bash
-cat /etc/modalai/voxl-tflite-server.conf
-```
-- Confirm Binary has your helper
-```bash
-strings /usr/bin/voxl-tflite-server | grep -E 'YOUR_ARCH|YourModelHelper'
-```
-- Confirm model file exists
-```bash
-ls -lh /usr/bin/dnn/your_model.tflite
-```
-- Confirm camera pipe exists
+## 6. Debug **[drone]**
+
 ```bash
 ls /run/mpa/
-ls /run/mpa/hires_front_small_color/
+voxl-inspect-services
+journalctl -b -u voxl-tflite-server --no-pager | tail -40
+journalctl -b -u voxl-open-vins-server --no-pager | tail -40
+strings /usr/bin/voxl-tflite-server | grep -E 'MIDAS|MidasModelHelper'
 ```
-- Inspect output pipe
+
+Per module:
+
 ```bash
-voxl-inspect-cam tflite
+voxl-inspect-cam tflite_disparity     # tflite: is disparity publishing
+voxl-inspect-vins                     # VIO: state and feature count
+voxl-inspect-cam metric_depth         # rescaler: is metric depth publishing
 ```
-- Timing test
+
+tflite timing mode, for per-stage timings and output rate:
+
 ```bash
 systemctl stop voxl-tflite-server
-sudo killall voxl-tflite-server 2>/dev/null
-ps aux | grep '[v]oxl-tflite-server' || echo "OK"
 /usr/bin/voxl-tflite-server -t
 ```
-For output FPS, look for a log line like `Current pipeline throughput: 2.5 frames per second`. The timing table is mainly useful for rough stage timing; depending on the helper, its `processed frames` count may not equal completed published output frames.
 
-## 10. Examples
+The board throttles hard without airflow. Above roughly 100 °C the GPU drops to
+its lowest clock and VIO features collapse, which reads as a software fault:
 
-These are complete helper examples you can copy into `voxl-tflite-server` instead of starting from `mymodel/`.
-Depth examples also need `depth_utils/` (which includes the shared `undistort.yml`, see §4.4).
-
-### 10.1 DepthAnythingV3
-
-Path:
-
-```text
-examples/DepthAnythingV3/
+```bash
+voxl-inspect-cpu
 ```
 
-This helper expects a float32 DA3 export:
+MPA consumers reconnect on their own, so a camera or VIO restart does not require
+restarting anything downstream.
 
-- input: NHWC RGB, `1x518x518x3`
-- input preprocessing: `uint8 RGB / 255.0`
-- output: float32 depth map
-- visualization: per-frame normalized JET colormap
-- suggested `model_architecture`: `DEPTHANYTHINGV3`
-- category: `MONO_DEPTH`
-- model: `tflite/DepthAnythingV3/depth_anything_v3.tflite`
+## 7. Registered Models
 
-### 10.2 MiDaS
+Registered in the `voxl-tflite-server` fork.
 
-Path:
+| Model | Input | Preprocessing | Output | `model_architecture` |
+| --- | --- | --- | --- | --- |
+| MiDaS | quantized `uint8` | RGB to `[0,1]`, then quantized | quantized or float depth | `MIDAS` |
+| DepthAnythingV3 | `1x518x518x3` float32 | `uint8 RGB / 255.0` | float32 depth | `DEPTHANYTHINGV3` |
+| ZipDepth | `1x384x384x3` float32 | `uint8 RGB / 255.0` | float32 inverse-depth | `ZIPDEPTH` |
 
-```text
-examples/MiDaS/
-```
-
-This helper is based on the Qualcomm AI Hub MiDaS w8a8 export:
-
-- input: quantized `uint8`
-- input preprocessing: RGB scaled to `[0,1]`, then quantized using `kMidasInScale` and `kMidasInZeroPoint`
-- output: quantized or float depth map
-- visualization: per-frame normalized JET colormap
-- suggested `model_architecture`: `MIDAS`
-- category: `MONO_DEPTH`
-- model: `tflite/MiDaS/midas.tflite`
-
-### 10.3 ZipDepth
-
-Path:
-
-```text
-examples/ZipDepth/
-```
-
-This helper expects a float32 ZipDepth export:
-
-- input: NHWC RGB, `1x384x384x3`
-- input preprocessing: `uint8 RGB / 255.0`
-- output: float32 inverse-depth
-- visualization: per-frame normalized JET colormap
-- suggested `model_architecture`: `ZIPDEPTH`
-- category: `MONO_DEPTH`
-- suggested delegate: `gpu`
-- model: `tflite/ZipDepth/zipdepth_base_384x384_float32.tflite`
+All are `MONO_DEPTH` and run on the `gpu` delegate. Each can publish two pipes
+(see `undistort.yml`): **image** (JET colormap viz) and **disparity** (float32
+for the rescaler, usually `tflite_disparity`). Binaries are under
+`tflite/<ModelName>/`.
 
 ## References
 
 - [voxl-tflite-server](https://docs.modalai.com/voxl-tflite-server/)
+- [Open-VINS server](https://docs.modalai.com/voxl-open-vins-server/)
 - [Qualcomm AI Hub](https://aihub.qualcomm.com/models)
+
+Fork changes for the modules live in [`modules/log.md`](modules/log.md).

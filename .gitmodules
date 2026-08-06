@@ -1,0 +1,12 @@
+[submodule "modules/mono_depth_rescaler"]
+	path = modules/mono_depth_rescaler
+	url = https://github.com/dineshvarunshankar/mono_depth_rescaler.git
+	branch = main
+[submodule "modules/voxl-open-vins-server"]
+	path = modules/voxl-open-vins-server
+	url = https://github.com/dineshvarunshankar/voxl-open-vins-server.git
+	branch = main
+[submodule "modules/voxl-tflite-server"]
+	path = modules/voxl-tflite-server
+	url = https://github.com/dineshvarunshankar/voxl-tflite-server.git
+	branch = main
