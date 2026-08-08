@@ -75,9 +75,8 @@ voxl-docker -l
 Every module builds the same way: enter the container from the module directory,
 install its dependencies, build, package.
 
-`dev` is the package section. Switch to `sdk-1.6` if a `dev` build fails to start
-on the drone with `undefined symbol`, which means it was linked against a library
-newer than the one installed there.
+`dev` is the package section, except VIO — see §3. Check library versions match
+the drone: `dpkg -l | grep libmodal`.
 
 ## 2. voxl-tflite-server
 
