@@ -4,11 +4,14 @@ Deploying TFLite models and the services around them on VOXL 2 (QRB5165).
 
 ```bash
 git clone --recursive https://github.com/dineshvarunshankar/AI_VOXL2.git   # repo + pinned modules
-cd AI_VOXL2 && git submodule update --init --remote --recursive            # optional: latest module mains
+cd AI_VOXL2
+git lfs install && git lfs pull                                            # models in tflite/ are LFS-tracked
+git submodule update --init --remote --recursive                           # optional: latest module mains
 ```
 
-`--recursive` is required; without it `modules/` is empty. Skip the second
-command if the pinned module commits are enough.
+`--recursive` is required; without it `modules/` is empty. Without `git lfs
+pull` the models in `tflite/` are pointer files. Skip the last command if the
+pinned module commits are enough.
 
 Commands are marked **[host]** for the build machine and **[drone]** for a shell
 on the VOXL. Anything starting `adb` runs on the host and acts on the drone.
@@ -129,7 +132,7 @@ voxl-inspect-cam tflite_disparity
 cd modules/voxl-open-vins-server
 voxl-docker -i voxl-cross
 ./install_build_deps.sh qrb5165 dev
-./build.sh qrb5165
+./build.sh qrb5165 # if it OOMs: cd build && make -j2 && cd ..
 ./make_package.sh
 exit
 ```
@@ -291,7 +294,7 @@ Registered in the `voxl-tflite-server` fork.
 
 | Model | Input | Preprocessing | Output | `model_architecture` |
 | --- | --- | --- | --- | --- |
-| MiDaS | quantized `uint8` | RGB to `[0,1]`, then quantized | quantized or float depth | `MIDAS` |
+| MiDaS | quantized `uint8` | RGB to `[0,1]`, then quantized | quantized or float depth | `MIDAS_V2` |
 | DepthAnythingV3 | `1x518x518x3` float32 | `uint8 RGB / 255.0` | float32 depth | `DEPTHANYTHINGV3` |
 | ZipDepth | `1x384x384x3` float32 | `uint8 RGB / 255.0` | float32 inverse-depth | `ZIPDEPTH` |
 

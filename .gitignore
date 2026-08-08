@@ -31,4 +31,4 @@ __pycache__/
 *.tmp
 
 # Local session notes
-SESSION_CONTEXT.md
+AGENTS.md
