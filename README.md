@@ -9,7 +9,7 @@ git lfs install && git lfs pull                                            # mod
 git submodule update --init --remote --recursive                           # optional: latest module mains
 ```
 
-`--recursive` is required; without it `modules/` is empty. Without `git lfs
+`--recursive` is required; Else `modules/` is empty. Without `git lfs
 pull` the models in `tflite/` are pointer files. Skip the last command if the
 pinned module commits are enough.
 
@@ -87,7 +87,7 @@ newer than the one installed there.
 cd modules/voxl-tflite-server
 voxl-docker -i voxl-cross
 ./install_build_deps.sh qrb5165 dev
-./build.sh qrb5165
+./build.sh qrb5165          # JOBS=2 ./build.sh qrb5165 if it OOMs
 ./make_package.sh
 exit
 ```
@@ -131,8 +131,8 @@ voxl-inspect-cam tflite_disparity
 ```bash
 cd modules/voxl-open-vins-server
 voxl-docker -i voxl-cross
-./install_build_deps.sh qrb5165 dev
-./build.sh qrb5165 # if it OOMs: cd build && make -j2 && cd ..
+./install_build_deps.sh qrb5165 sdk-1.6   # dev has no libmodal-flow 1.0.3
+./build.sh qrb5165          # JOBS=2 ./build.sh qrb5165 if it OOMs
 ./make_package.sh
 exit
 ```
@@ -177,7 +177,7 @@ Initialisation needs motion; a stationary drone sits in `INIT`.
 cd modules/mono_depth_rescaler
 voxl-docker -i voxl-cross
 ./install_build_deps.sh qrb5165 dev
-./build.sh qrb5165
+./build.sh qrb5165          # JOBS=2 ./build.sh qrb5165 if it OOMs
 ./make_package.sh
 exit
 ```
@@ -269,6 +269,12 @@ Per module:
 voxl-inspect-cam tflite_disparity     # tflite: is disparity publishing
 voxl-inspect-vins                     # VIO: state and feature count
 voxl-inspect-cam metric_depth         # rescaler: is metric depth publishing
+```
+
+To see why VIO fails to start or publish:
+
+```bash
+systemctl stop voxl-open-vins-server && /usr/local/bin/voxl-open-vins-server -v -d
 ```
 
 tflite timing mode, for per-stage timings and output rate:
