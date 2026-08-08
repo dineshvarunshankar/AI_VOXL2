@@ -46,15 +46,16 @@ AI_VOXL2/
 └── tflite/               #model binaries
 ```
 
-The ModalAI service configs we modify and push are placed in `configs/`.
+`configs/` holds drone configs that no module of ours packages. Paths mirror the
+drone.
 
 ```text
-configs/etc/modalai/   camera-server, tflite-server, open-vins-server, qvio-server,
-                       imu-server, px4, rangefinder-server, vio_cams, extrinsics
+configs/etc/modalai/   camera-server, qvio-server, imu-server, px4,
+                       rangefinder-server, vio_cams, extrinsics
 ```
 
-Paths mirror the drone. §5 lists which of these we change. `undistort.yml` and
-`estimator_config.yaml` are installed by their packages instead.
+Configs belonging to our three modules live in those modules and ship in their
+`.deb`. §5 pushes the rest; §6 checks both.
 
 ## 1. Install Build Tools
 
@@ -96,15 +97,15 @@ exit
 ```bash
 ./deploy_to_voxl.sh adb          # or: ./deploy_to_voxl.sh ssh <ip>
 adb push ../../tflite/MiDaS/midas.tflite /usr/bin/dnn/midas.tflite
-adb push ../../configs/etc/modalai/voxl-tflite-server.conf /etc/modalai/voxl-tflite-server.conf
 ```
 
 ### Configure
 
-The pushed `voxl-tflite-server.conf` sets model path, architecture, input pipe
-and delegate. `voxl-configure-tflite` writes the same file if you prefer flags.
+The `.deb` carries `voxl-tflite-server.conf`, which sets model path,
+architecture, input pipe and delegate. `voxl-configure-tflite` writes the same
+file if you prefer flags.
 
-- `model_architecture` selects the helper; see §7 for what's registered
+- `model_architecture` selects the helper; see §8 for what's registered
 - `delegate`: `gpu`, `nnapi`, or `cpu`
 - `skip_n_frames` throttles inference. The model runs at roughly 15 fps, so use
   `0` when the camera is at 15 fps and `1` when it is at 30
@@ -142,8 +143,8 @@ exit
 ./deploy_to_voxl.sh adb
 ```
 
-The `.deb` carries `estimator_config.yaml` with the tuned values. Confirm it
-after install, per §5.
+The `.deb` carries `estimator_config.yaml` and `voxl-open-vins-server.conf` with
+the tuned values. Confirm them after install, per §6.
 
 ### Configure
 
@@ -228,31 +229,32 @@ systemctl is-active mono_depth_rescaler
 voxl-inspect-cam metric_depth
 ```
 
-## 5. Configs to Check After Deploying
+## 5. Push Configs **[host]**
 
-The files we change from ModalAI defaults. Confirm them on the drone after
-deploying.
-
-| file on the drone | what we set | delivered by |
-| --- | --- | --- |
-| `/etc/voxl-tflite-server/undistort.yml` | fov, publish flags, hires calibration | `voxl-tflite-server` package |
-| `/etc/modalai/voxl-tflite-server.conf` | model path, architecture, delegate, `skip_n_frames` | `voxl-configure-tflite`, or push from `configs/` |
-| `/usr/share/modalai/voxl-open-vins/VoxlConfig/starling2/estimator_config.yaml` | `num_pts`, `min_px_dist`, `max_msckf_in_update`, `max_slam_in_update` | `voxl-open-vins-server` package |
-| `/etc/modalai/voxl-camera-server.conf` | ToF at 15 fps | push from `configs/` |
-| `/etc/mono_depth_rescaler/pipeline.yaml` | VIO profile, fov, input resolution, pipe name | `mono-depth-rescaler` package |
+`voxl-camera-server` is not one of our modules, so its config is pushed. Run
+from the repo root.
 
 ```bash
-grep -E "num_pts|min_px_dist|max_msckf_in_update|max_slam_in_update" \
-  /usr/share/modalai/voxl-open-vins/VoxlConfig/starling2/estimator_config.yaml
-grep -E "fps|name" /etc/modalai/voxl-camera-server.conf | grep -A1 tof
-cat /etc/modalai/voxl-tflite-server.conf
+adb push configs/etc/modalai/voxl-camera-server.conf /etc/modalai/voxl-camera-server.conf
+adb shell systemctl restart voxl-camera-server
 ```
 
-`configs/` also holds `extrinsics.conf`, `vio_cams.conf`, `voxl-imu-server.conf`,
-`voxl-px4.conf`, `voxl-qvio-server.conf` and `voxl-rangefinder-server.conf`, for
-reference.
+The rest of `configs/etc/modalai/` is ModalAI defaults, kept for reference.
 
-## 6. Debug **[drone]**
+## 6. Configs Carried by a Package
+
+A reinstall overwrites these.
+
+```bash
+grep -E "num_pts|max_cameras|calib_cam_|min_px_dist|max_msckf_in_update|max_slam_in_update" \
+  /usr/share/modalai/voxl-open-vins/VoxlConfig/starling2/estimator_config.yaml
+grep -E "anchor_cone" /etc/modalai/voxl-open-vins-server.conf
+cat /etc/modalai/voxl-tflite-server.conf
+grep -E "profile|min_quality|fov|input_resolution|mpa_pipe_name" /etc/mono_depth_rescaler/pipeline.yaml
+grep -E "publish_image|publish_disparity|fov" /etc/voxl-tflite-server/undistort.yml
+```
+
+## 7. Debug **[drone]**
 
 ```bash
 ls /run/mpa/
@@ -293,7 +295,7 @@ voxl-inspect-cpu
 MPA consumers reconnect on their own, so a camera or VIO restart does not require
 restarting anything downstream.
 
-## 7. Registered Models
+## 8. Registered Models
 
 Registered in the `voxl-tflite-server` fork.
 
