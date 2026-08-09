@@ -97,6 +97,8 @@ exit
 ```bash
 ./deploy_to_voxl.sh adb          # or: ./deploy_to_voxl.sh ssh <ip>
 adb push ../../tflite/MiDaS/midas.tflite /usr/bin/dnn/midas.tflite
+adb push ../../tflite/ZipDepth/zipdepth_npu.tflite /usr/bin/dnn/zipdepth_npu.tflite
+
 ```
 
 ### Configure
@@ -207,8 +209,11 @@ deployment:
   profile: qvio      # or openvins
 inference:
   fov: crop
-  input_resolution: [256, 256]
   mpa_pipe_name: tflite_disparity
+output:
+  size: 0            # 0 = model resolution, else NxN
+  format: float32    # or uint16_mm
+  viz: 0             # 1 also publishes metric_depth_viz, a JET view
 ```
 
 Enable the matching VIO service. The `inference` block must agree with the tflite
@@ -218,7 +223,7 @@ side or frames are dropped:
 | --- | --- |
 | `voxl-tflite-server.conf` | `allow_multiple: false`, input `hires_small_color` |
 | `undistort.yml` | `publish_image: 0`, `publish_disparity: 1`, `fov: crop` |
-| `pipeline.yaml` | `mpa_pipe_name: tflite_disparity`, `fov: crop`, `input_resolution: [256, 256]` |
+| `pipeline.yaml` | `mpa_pipe_name: tflite_disparity`, `fov: crop` |
 
 ### Verify **[drone]**
 
@@ -301,8 +306,8 @@ Registered in the `voxl-tflite-server` fork.
 | Model | Input | Preprocessing | Output | `model_architecture` |
 | --- | --- | --- | --- | --- |
 | MiDaS | quantized `uint8` | RGB to `[0,1]`, then quantized | quantized or float depth | `MIDAS_V2` |
-| DepthAnythingV3 | `1x518x518x3` float32 | `uint8 RGB / 255.0` | float32 depth | `DEPTHANYTHINGV3` |
-| ZipDepth | `1x384x384x3` float32 | `uint8 RGB / 255.0` | float32 inverse-depth | `ZIPDEPTH` |
+| DepthAnythingV3 | `1x518x518x3` float32 | `uint8 RGB / 255.0` | float32 depth | `DA3` |
+| ZipDepth | `1x384x384x3` float32 | `uint8 RGB / 255.0` | float32 inverse-depth | `ZIP_DEPTH` |
 
 All are `MONO_DEPTH` and run on the `gpu` delegate. Each can publish two pipes
 (see `undistort.yml`): **image** (JET colormap viz) and **disparity** (float32
