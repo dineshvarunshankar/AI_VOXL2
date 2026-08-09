@@ -98,7 +98,6 @@ exit
 ./deploy_to_voxl.sh adb          # or: ./deploy_to_voxl.sh ssh <ip>
 adb push ../../tflite/MiDaS/midas.tflite /usr/bin/dnn/midas.tflite
 adb push ../../tflite/ZipDepth/zipdepth_npu.tflite /usr/bin/dnn/zipdepth_npu.tflite
-
 ```
 
 ### Configure
@@ -157,9 +156,6 @@ Three files configure it:
 - `/etc/modalai/vio_cams.conf` : which camera pipes feed VIO
 - `<yaml_folder>/estimator_config.yaml` : the estimator, including feature yield
   (`num_pts`, `min_px_dist`, `max_msckf_in_update`, `max_slam_in_update`)
-
-`voxl-configure-open-vins starling2_2cam` **[drone]** regenerates the first two
-from the Starling 2 preset.
 
 ### Verify **[drone]**
 
@@ -261,7 +257,7 @@ grep -E "num_pts|max_cameras|calib_cam_|min_px_dist|max_msckf_in_update|max_slam
   /usr/share/modalai/voxl-open-vins/VoxlConfig/starling2/estimator_config.yaml
 grep -E "anchor_cone" /etc/modalai/voxl-open-vins-server.conf
 cat /etc/modalai/voxl-tflite-server.conf
-grep -E "profile|min_quality|fov|input_resolution|mpa_pipe_name" /etc/mono_depth_rescaler/pipeline.yaml
+grep -E "profile|min_quality|fov|mpa_pipe_name|size|format|viz" /etc/mono_depth_rescaler/pipeline.yaml
 grep -E "publish_image|publish_disparity|fov" /etc/voxl-tflite-server/undistort.yml
 ```
 
@@ -296,8 +292,8 @@ systemctl stop voxl-tflite-server
 /usr/bin/voxl-tflite-server -t
 ```
 
-The board throttles hard without airflow. Above roughly 100 °C the GPU drops to
-its lowest clock and VIO features collapse, which reads as a software fault:
+The board throttles without airflow. Check temperature before assuming any
+issues:
 
 ```bash
 voxl-inspect-cpu
