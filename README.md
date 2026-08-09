@@ -187,8 +187,7 @@ exit
 ### Deploy **[host]**
 
 ```bash
-adb push mono-depth-rescaler_*_arm64.deb /tmp/
-adb shell dpkg -i /tmp/mono-depth-rescaler_*_arm64.deb
+./deploy_to_voxl.sh adb          # or: ./deploy_to_voxl.sh ssh <ip>
 ```
 
 The `.deb` carries `pipeline.yaml`, intrinsics and extrinsics into
