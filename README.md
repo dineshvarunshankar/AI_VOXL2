@@ -235,13 +235,20 @@ voxl-inspect-cam metric_depth
 
 ## 5. Push Configs **[host]**
 
-`voxl-camera-server` is not one of our modules, so its config is pushed. Run
-from the repo root.
+Three files no package delivers. Each one differs from the ModalAI default.
 
 ```bash
 adb push configs/etc/modalai/voxl-camera-server.conf /etc/modalai/voxl-camera-server.conf
-adb shell systemctl restart voxl-camera-server
+adb push configs/etc/modalai/voxl-imu-server.conf    /etc/modalai/voxl-imu-server.conf
+adb push configs/etc/modalai/vio_cams.conf           /etc/modalai/vio_cams.conf
+adb shell systemctl restart voxl-camera-server voxl-imu-server voxl-open-vins-server
 ```
+
+| file | default | ours |
+| --- | --- | --- |
+| `voxl-camera-server.conf` | hires 30 fps | 15 fps |
+| `voxl-imu-server.conf` | 1000 Hz, polled 100 Hz | 200 Hz, polled 200 Hz |
+| `vio_cams.conf` | both tracking cameras | `tracking_front` only |
 
 The rest of `configs/etc/modalai/` is ModalAI defaults, kept for reference.
 
