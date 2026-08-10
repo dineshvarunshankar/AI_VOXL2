@@ -2,16 +2,16 @@
 
 Deploying TFLite models and the services around them on VOXL 2 (QRB5165).
 
+Tested on voxl-suite `1.6.3~beta8`.
+
 ```bash
 git clone --recursive https://github.com/dineshvarunshankar/AI_VOXL2.git   # repo + pinned modules
 cd AI_VOXL2
 git lfs install && git lfs pull                                            # models in tflite/ are LFS-tracked
-git submodule update --init --remote --recursive                           # optional: latest module mains
 ```
 
 `--recursive` is required; Else `modules/` is empty. Without `git lfs
-pull` the models in `tflite/` are pointer files. Skip the last command if the
-pinned module commits are enough.
+pull` the models in `tflite/` are pointer files.
 
 Commands are marked **[host]** for the build machine and **[drone]** for a shell
 on the VOXL. Anything starting `adb` runs on the host and acts on the drone.
@@ -33,6 +33,8 @@ see `mymodel/README.md`.
 - Docker
 - ModalAI `voxl-docker` wrapper and `voxl-cross` image
 
+Keep the board cooled. It throttles under sustained load and VIO falls behind.
+
 ## Repo Layout
 
 ```text
@@ -50,8 +52,8 @@ AI_VOXL2/
 drone.
 
 ```text
-configs/etc/modalai/   camera-server, qvio-server, imu-server, px4,
-                       rangefinder-server, vio_cams, extrinsics
+configs/etc/modalai/   camera-server, cpu-monitor, imu-server, px4,
+                       qvio-server, rangefinder-server, vio_cams, extrinsics
 ```
 
 Configs belonging to our three modules live in those modules and ship in their
@@ -61,6 +63,8 @@ Configs belonging to our three modules live in those modules and ship in their
 
 **[host]** `voxl-docker` runs the container with the right mounts. `voxl-cross`
 is the image with the cross compiler and SDK dependencies.
+
+Download `voxl-cross_V4.8.tgz` from ModalAI's developer downloads first.
 
 ```bash
 mkdir -p ~/voxl2 && cd ~/voxl2
@@ -154,8 +158,9 @@ Three files configure it:
 - `/etc/modalai/voxl-open-vins-server.conf` : service behaviour, auto-reset
   thresholds, and `yaml_folder` pointing at the platform config
 - `/etc/modalai/vio_cams.conf` : which camera pipes feed VIO
-- `<yaml_folder>/estimator_config.yaml` : the estimator, including feature yield
-  (`num_pts`, `min_px_dist`, `max_msckf_in_update`, `max_slam_in_update`)
+- `<yaml_folder>/estimator_config.yaml` : the estimator — feature yield
+  (`num_pts`, `min_px_dist`, `max_msckf_in_update`, `max_slam_in_update`),
+  `max_cameras`, and the three `calib_cam_*` flags
 
 ### Verify **[drone]**
 
@@ -202,14 +207,14 @@ adb push config/pipeline.yaml /etc/mono_depth_rescaler/pipeline.yaml
 
 ```yaml
 deployment:
-  profile: qvio      # or openvins
+  profile: openvins   # or qvio
 inference:
   fov: crop
   mpa_pipe_name: tflite_disparity
 output:
-  size: 0            # 0 = model resolution, else NxN
-  format: float32    # or uint16_mm
-  viz: 0             # 1 also publishes metric_depth_viz, a JET view
+  size: 0             # 0 = model resolution, else NxN
+  format: uint16_mm   # millimetres; or float32 for metres
+  viz: 0              # 1 also publishes metric_depth_viz, a JET view
 ```
 
 Enable the matching VIO service. The `inference` block must agree with the tflite
@@ -231,13 +236,14 @@ voxl-inspect-cam metric_depth
 
 ## 5. Push Configs **[host]**
 
-Three files no package delivers. Each one differs from the ModalAI default.
+Four files no package delivers. Each one differs from the ModalAI default.
 
 ```bash
 adb push configs/etc/modalai/voxl-camera-server.conf /etc/modalai/voxl-camera-server.conf
 adb push configs/etc/modalai/voxl-imu-server.conf    /etc/modalai/voxl-imu-server.conf
 adb push configs/etc/modalai/vio_cams.conf           /etc/modalai/vio_cams.conf
-adb shell systemctl restart voxl-camera-server voxl-imu-server voxl-open-vins-server
+adb push configs/etc/modalai/voxl-cpu-monitor.conf   /etc/modalai/voxl-cpu-monitor.conf
+adb shell systemctl restart voxl-camera-server voxl-imu-server voxl-cpu-monitor voxl-open-vins-server
 ```
 
 | file | default | ours |
@@ -245,6 +251,7 @@ adb shell systemctl restart voxl-camera-server voxl-imu-server voxl-open-vins-se
 | `voxl-camera-server.conf` | hires 30 fps | 15 fps |
 | `voxl-imu-server.conf` | 1000 Hz, polled 100 Hz | 200 Hz, polled 200 Hz |
 | `vio_cams.conf` | both tracking cameras | `tracking_front` only |
+| `voxl-cpu-monitor.conf` | `pitmode_governor: cool` | `auto`, so the bench matches flight |
 
 The rest of `configs/etc/modalai/` is ModalAI defaults, kept for reference.
 
@@ -299,6 +306,9 @@ issues:
 voxl-inspect-cpu
 ```
 
+With the autopilot disarmed the board enters pitmode, a low-power state. Bench
+numbers are slower than flight unless `pitmode_governor` is `auto`.
+
 MPA consumers reconnect on their own, so a camera or VIO restart does not require
 restarting anything downstream.
 
@@ -306,11 +316,14 @@ restarting anything downstream.
 
 Registered in the `voxl-tflite-server` fork.
 
-| Model | Input | Preprocessing | Output | `model_architecture` |
-| --- | --- | --- | --- | --- |
-| MiDaS | quantized `uint8` | RGB to `[0,1]`, then quantized | quantized or float depth | `MIDAS_V2` |
-| DepthAnythingV3 | `1x518x518x3` float32 | `uint8 RGB / 255.0` | float32 depth | `DA3` |
-| ZipDepth | `1x384x384x3` float32 | `uint8 RGB / 255.0` | float32 inverse-depth | `ZIP_DEPTH` |
+| Model | Input tensor | `model_architecture` |
+| --- | --- | --- |
+| MiDaS | `1x256x256x3` uint8, quantized | `MIDAS_V2` |
+| DepthAnythingV3 | `1x518x518x3` float32 | `DA3` |
+| ZipDepth | `1x384x384x3` float32 | `ZIP_DEPTH` |
+
+All three take the same uint8 RGB image and publish float32 relative inverse
+depth, where a larger value means nearer.
 
 All are `MONO_DEPTH` and run on the `gpu` delegate. Each can publish two pipes
 (see `undistort.yml`): **image** (JET colormap viz) and **disparity** (float32

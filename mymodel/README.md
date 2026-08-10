@@ -16,6 +16,10 @@ You can get that from Netron, your export scripts, or the model card. If the
 model came from [Qualcomm AI Hub](https://aihub.qualcomm.com/models), use its
 `metadata.json`, and pick a device profile close to QRB5165 when exporting.
 
+For a depth model, publish inverse depth on the disparity pipe — larger means
+nearer. Invert in the helper if the model outputs true depth, or
+`mono_depth_rescaler` fits the curve backwards.
+
 ## 2. Start from the template
 
 Files:
