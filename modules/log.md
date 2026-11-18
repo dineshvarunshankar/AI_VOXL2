@@ -1,24 +1,18 @@
-# Module fork changes
+# Module Fork Changes
 
-`master` = ModalAI mirror. Our work is on `main`.
+ModalAI forks use `master` for the upstream mirror and `main` for local changes.
 
 ## voxl-tflite-server
 
-- Fixed a hang: worker threads could miss each other’s wake-up signal and stop
-  publishing while still looking “alive”.
-- Added shared depth helpers (undistort, preprocess, output format).
-- Registered MiDaS, DepthAnythingV3, ZipDepth.
-- Added **disparity** output pipe (`tflite_disparity`); depth no longer drops
-  when nobody is on the image/detection pipes.
-- Ships `undistort.yml` (must push/install; camera block is per-airframe —
-  D0014 by default).
+- Fixed missed worker wake-up signals.
+- Added shared depth preprocessing and output helpers.
+- Registered MiDaS, DepthAnythingV3, and ZipDepth.
+- Added the `tflite_disparity` pipe and inference without image-pipe clients.
+- Added `undistort.yml` with D0014 camera calibration defaults.
 
 ## voxl-open-vins-server
 
-- Crash fix when tracking goes sparse (not enough points after optical flow →
-  OpenCV throw).
-- Based on open_vins **0.6.2** (correct 3D feature positions for the rescaler).
-- Tuned Starling 2 feature yield in `estimator_config.yaml`:
-  `num_pts` 50→200, `min_px_dist` 50→20, `max_msckf_in_update` 10→20,
-  `max_slam_in_update` 15→25.
-
+- Added a sparse-tracking RANSAC guard in the `open_vins` submodule.
+- Uses server version 0.6.2 with corrected anchored-feature positions.
+- Set Starling 2 values in `estimator_config.yaml`:
+  `num_pts: 250`, `min_px_dist: 20`, `max_msckf_in_update: 20`, and `max_slam_in_update: 25`.
