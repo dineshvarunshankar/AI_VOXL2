@@ -1,73 +1,38 @@
-# Adding a Model
+# Add a Model
 
-How to deploy your own model on `voxl-tflite-server`.
+## 1. Check the tensor format
 
-## 1. What you need to know about the model
+Record the input shape, layout, dtype, normalization, and quantization scale and zero-point.
+Record the output shape, dtype, and value meaning.
 
-Before writing code, collect:
+The base helper assumes NHWC input, such as `1x256x256x3`.
+For NCHW input, update the helper dimensions and preprocessing before inference.
 
-- Input shape (e.g. `1x256x256x3` or `1x3x518x518`)
-- Layout (usually NHWC on TFLite)
-- Input dtype (`uint8`, `int8`, or `float32`)
-- If quantized: scale and zero-point
-- Output shape and what the values mean (depth, logits, boxes, mask, …)
+For depth models, publish inverse depth on the disparity pipe. Larger values mean nearer surfaces.
 
-You can get that from Netron, your export scripts, or the model card. If the
-model came from [Qualcomm AI Hub](https://aihub.qualcomm.com/models), use its
-`metadata.json`, and pick a device profile close to QRB5165 when exporting.
+## 2. Copy and complete the template
 
-For a depth model, publish inverse depth on the disparity pipe — larger means
-nearer. Invert in the helper if the model outputs true depth, or
-`mono_depth_rescaler` fits the curve backwards.
-
-## 2. Start from the template
-
-Files:
-
-- `include/model_helper/mymodel_model_helper.h`
-- `src/model_helper/mymodel_model_helper.cpp`
-
-Rename `mymodel` / `MyModel` / `MYMODEL` everywhere to your model name.
-
-The helper has four pieces you fill in:
-
-1. **Constructor**  
-   Calls `ModelHelper(...)`. The base class loads the `.tflite`, builds the
-   interpreter, and fills `model_height`, `model_width`, `model_channels` from
-   the input tensor.
-
-2. **`run_inference`**  
-   Copy `preprocessed_image` into the input tensor (respect dtype / layout /
-   quantization), then `Invoke()`.
-
-3. **`postprocess`**  
-   Read the output tensor and turn it into whatever you will publish.
-
-4. **`worker`**  
-   Call `postprocess` and publish on the MPA pipe(s). Keep `timestamp_ns` as
-   the camera capture time. Do not replace it with
-   `rc_nanos_monotonic_time()` unless you mean to; that stamps publish time and
-   skews anything synced to IMU/VIO by the inference latency.
-
-Look at the existing helpers under
-`modules/voxl-tflite-server/src/model_helper/` (MiDaS, ZipDepth, YOLO, …) and
-copy the pattern that matches your category.
-
-Config side: put the `.tflite` path in `voxl-tflite-server.conf`, and set
-`model_architecture` to the string you register in `get_model_type()` below so
-the server constructs your helper.
-
-## 3. Copy into the server tree
+From the AI_VOXL2 repository root:
 
 ```bash
-cd modules/voxl-tflite-server
-cp ../../mymodel/include/model_helper/*.h include/model_helper/
-cp ../../mymodel/src/model_helper/*.cpp   src/model_helper/
+cp mymodel/include/model_helper/*.h modules/voxl-tflite-server/include/model_helper/
+cp mymodel/src/model_helper/*.cpp modules/voxl-tflite-server/src/model_helper/
 ```
 
-## 4. Register it
+Rename `mymodel`, `MyModel`, and `MYMODEL` to your model name.
 
-**`include/model_helper/model_info.h`** — add an enum value:
+| Method | Required implementation |
+| --- | --- |
+| Constructor | Initialize `ModelHelper` and any model-specific dimensions. |
+| `run_inference` | Copy the input with the correct dtype, layout, and quantization. Call `Invoke()`. |
+| `postprocess` | Decode the output tensor and set the output metadata. |
+| `worker` | Publish the output on the correct MPA pipe. Preserve the camera timestamp and exposure. |
+
+Use the [existing helpers](../modules/voxl-tflite-server/src/model_helper/) as examples.
+
+## 3. Register the helper
+
+Add an enum value in `include/model_helper/model_info.h`:
 
 ```cpp
 enum ModelName
@@ -78,8 +43,7 @@ enum ModelName
 };
 ```
 
-**`src/model_helper/model_helper.cpp`** — include the header and add a factory
-case in `create_model_helper()`:
+In `src/model_helper/model_helper.cpp`, include the header and add a case to `create_model_helper()`:
 
 ```cpp
 #include "model_helper/mymodel_model_helper.h"
@@ -96,11 +60,9 @@ case MYMODEL:
 }
 ```
 
-Pick the category that fits: `OBJECT_DETECTION`, `CLASSIFICATION`,
-`SEGMENTATION`, `MONO_DEPTH`, or `POSE`.
+Select the model category: `OBJECT_DETECTION`, `CLASSIFICATION`, `SEGMENTATION`, `MONO_DEPTH`, or `POSE`.
 
-**`src/main.cpp`** — in `get_model_type()`, map your config string and list it
-in the valid-options error text:
+In `src/main.cpp`, add the configuration string to `get_model_type()` and its valid-options message:
 
 ```cpp
 else if (!strcasecmp(model_architecture, "MYMODEL"))
@@ -110,13 +72,11 @@ else if (!strcasecmp(model_architecture, "MYMODEL"))
 }
 ```
 
-That string is what you put in `"model_architecture"` in
-`/etc/modalai/voxl-tflite-server.conf`.
+## 4. Build and configure
 
-## 5. Build and deploy
+Follow the [server build and deployment instructions](../README.md).
 
-Follow the main README (`voxl-tflite-server` build / package / push).
+Set the model file path and `model_architecture` in `/etc/modalai/voxl-tflite-server.conf`.
 
-For depth models, also set `undistort.yml` (`publish_image` /
-`publish_disparity`, FOV, camera calibration) as described there. The rescaler
-expects the disparity pipe (`tflite_disparity` when `allow_multiple` is false).
+For depth models, configure `undistort.yml` with the camera calibration, FOV, and output flags.
+With `allow_multiple: false`, the disparity pipe is `tflite_disparity`.
